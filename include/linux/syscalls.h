@@ -887,4 +887,6 @@ asmlinkage long sys_execveat(int dfd, const char __user *filename,
 
 asmlinkage long sys_membarrier(int cmd, int flags);
 
+asmlinkage long sys_gbp_session_create(unsigned int flags);
+
 #endif
