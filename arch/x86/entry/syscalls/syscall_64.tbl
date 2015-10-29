@@ -331,6 +331,7 @@
 322	64	execveat		stub_execveat
 323	common	userfaultfd		sys_userfaultfd
 324	common	membarrier		sys_membarrier
+325	common	gbp_session_create	sys_gbp_session_create
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact
