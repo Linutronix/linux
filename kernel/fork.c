@@ -75,6 +75,7 @@
 #include <linux/aio.h>
 #include <linux/compiler.h>
 #include <linux/sysctl.h>
+#include <linux/prctl.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -367,6 +368,13 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 
 #ifdef CONFIG_CC_STACKPROTECTOR
 	tsk->stack_canary = get_random_int();
+#endif
+
+#ifdef CONFIG_UPROBES
+	if (tsk->global_bp_flags & PR_GLOBAL_BREAKPOINT_FORK)
+		tsk->global_bp_flags = PR_GLOBAL_BREAKPOINT_EN_FORK;
+	else
+		tsk->global_bp_flags = 0;
 #endif
 
 	/*
