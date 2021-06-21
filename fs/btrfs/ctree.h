@@ -2786,7 +2786,6 @@ enum btrfs_flush_state {
 	ALLOC_CHUNK_FORCE	=	9,
 	RUN_DELAYED_IPUTS	=	10,
 	COMMIT_TRANS		=	11,
-	FORCE_COMMIT_TRANS	=	12,
 };
 
 int btrfs_subvolume_reserve_metadata(struct btrfs_root *root,
