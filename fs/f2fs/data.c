@@ -3850,7 +3850,7 @@ static int f2fs_migrate_blocks(struct inode *inode, block_t start_blk,
 	int ret = 0;
 
 	down_write(&F2FS_I(inode)->i_gc_rwsem[WRITE]);
-	down_write(&F2FS_I(inode)->i_mmap_sem);
+	filemap_invalidate_lock(inode->i_mapping);
 
 	set_inode_flag(inode, FI_ALIGNED_WRITE);
 
@@ -3892,7 +3892,7 @@ done:
 	clear_inode_flag(inode, FI_DO_DEFRAG);
 	clear_inode_flag(inode, FI_ALIGNED_WRITE);
 
-	up_write(&F2FS_I(inode)->i_mmap_sem);
+	filemap_invalidate_unlock(inode->i_mapping);
 	up_write(&F2FS_I(inode)->i_gc_rwsem[WRITE]);
 
 	return ret;
