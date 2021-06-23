@@ -5034,6 +5034,54 @@ see KVM_XEN_VCPU_SET_ATTR above.
 The KVM_XEN_VCPU_ATTR_TYPE_RUNSTATE_ADJUST type may not be used
 with the KVM_XEN_VCPU_GET_ATTR ioctl.
 
+
+4.131 KVM_GET_SREGS2
+------------------
+
+:Capability: KVM_CAP_SREGS2
+:Architectures: x86
+:Type: vcpu ioctl
+:Parameters: struct kvm_sregs2 (out)
+:Returns: 0 on success, -1 on error
+
+Reads special registers from the vcpu.
+This ioctl (when supported) replaces the KVM_GET_SREGS.
+
+::
+
+struct kvm_sregs2 {
+	/* out (KVM_GET_SREGS2) / in (KVM_SET_SREGS2) */
+	struct kvm_segment cs, ds, es, fs, gs, ss;
+	struct kvm_segment tr, ldt;
+	struct kvm_dtable gdt, idt;
+	__u64 cr0, cr2, cr3, cr4, cr8;
+	__u64 efer;
+	__u64 apic_base;
+	__u64 flags;
+	__u64 pdptrs[4];
+};
+
+flags values for ``kvm_sregs2``:
+
+``KVM_SREGS2_FLAGS_PDPTRS_VALID``
+
+  Indicates thats the struct contain valid PDPTR values.
+
+
+4.132 KVM_SET_SREGS2
+------------------
+
+:Capability: KVM_CAP_SREGS2
+:Architectures: x86
+:Type: vcpu ioctl
+:Parameters: struct kvm_sregs2 (in)
+:Returns: 0 on success, -1 on error
+
+Writes special registers into the vcpu.
+See KVM_GET_SREGS2 for the data structures.
+This ioctl (when supported) replaces the KVM_SET_SREGS.
+
+
 5. The kvm_run structure
 ========================
 
@@ -6909,3 +6957,33 @@ This capability is always enabled.
 This capability indicates that the KVM virtual PTP service is
 supported in the host. A VMM can check whether the service is
 available to the guest on migration.
+
+8.33 KVM_CAP_HYPERV_ENFORCE_CPUID
+-----------------------------
+
+Architectures: x86
+
+When enabled, KVM will disable emulated Hyper-V features provided to the
+guest according to the bits Hyper-V CPUID feature leaves. Otherwise, all
+currently implmented Hyper-V features are provided unconditionally when
+Hyper-V identification is set in the HYPERV_CPUID_INTERFACE (0x40000001)
+leaf.
+
+8.34 KVM_CAP_EXIT_HYPERCALL
+---------------------------
+
+:Capability: KVM_CAP_EXIT_HYPERCALL
+:Architectures: x86
+:Type: vm
+
+This capability, if enabled, will cause KVM to exit to userspace
+with KVM_EXIT_HYPERCALL exit reason to process some hypercalls.
+
+Calling KVM_CHECK_EXTENSION for this capability will return a bitmask
+of hypercalls that can be configured to exit to userspace.
+Right now, the only such hypercall is KVM_HC_MAP_GPA_RANGE.
+
+The argument to KVM_ENABLE_CAP is also a bitmask, and must be a subset
+of the result of KVM_CHECK_EXTENSION.  KVM will forward to userspace
+the hypercalls whose corresponding bit is in the argument, and return
+ENOSYS for the others.

@@ -1083,7 +1083,10 @@ struct kvm_ppc_resize_hpt {
 #define KVM_CAP_SGX_ATTRIBUTE 196
 #define KVM_CAP_VM_COPY_ENC_CONTEXT_FROM 197
 #define KVM_CAP_PTP_KVM 198
-#define KVM_CAP_PPC_RPT_INVALIDATE 199
+#define KVM_CAP_HYPERV_ENFORCE_CPUID 199
+#define KVM_CAP_SREGS2 200
+#define KVM_CAP_EXIT_HYPERCALL 201
+#define KVM_CAP_PPC_RPT_INVALIDATE 202
 
 #ifdef KVM_CAP_IRQ_ROUTING
 
@@ -1621,6 +1624,9 @@ struct kvm_xen_hvm_attr {
 /* Per-vCPU Xen attributes */
 #define KVM_XEN_VCPU_GET_ATTR	_IOWR(KVMIO, 0xca, struct kvm_xen_vcpu_attr)
 #define KVM_XEN_VCPU_SET_ATTR	_IOW(KVMIO,  0xcb, struct kvm_xen_vcpu_attr)
+
+#define KVM_GET_SREGS2             _IOR(KVMIO,  0xcc, struct kvm_sregs2)
+#define KVM_SET_SREGS2             _IOW(KVMIO,  0xcd, struct kvm_sregs2)
 
 struct kvm_xen_vcpu_attr {
 	__u16 type;
