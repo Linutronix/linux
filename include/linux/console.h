@@ -149,6 +149,8 @@ struct console {
 	short	flags;
 	short	index;
 	int	cflag;
+	u64 	seq;
+	unsigned long dropped;
 	void	*data;
 	struct	 console *next;
 };
