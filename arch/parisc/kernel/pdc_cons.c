@@ -130,7 +130,7 @@ static void pdc_console_poll(struct timer_list *unused)
 	if (count)
 		tty_flip_buffer_push(&tty_port);
 
-	if (pdc_cons.flags & CON_ENABLED)
+	if (console_is_enabled(&pdc_cons))
 		mod_timer(&pdc_console_timer, jiffies + PDC_CONS_POLL_DELAY);
 }
 

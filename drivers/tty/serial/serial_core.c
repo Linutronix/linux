@@ -1890,7 +1890,7 @@ static int uart_proc_show(struct seq_file *m, void *v)
 
 static inline bool uart_console_enabled(struct uart_port *port)
 {
-	return uart_console(port) && (port->cons->flags & CON_ENABLED);
+	return uart_console(port) && console_is_enabled(port->cons);
 }
 
 static void uart_port_spin_lock_init(struct uart_port *port)
@@ -2365,7 +2365,7 @@ uart_configure_port(struct uart_driver *drv, struct uart_state *state,
 		 * successfully registered yet, try to re-register it.
 		 * It may be that the port was not available.
 		 */
-		if (port->cons && !(port->cons->flags & CON_ENABLED))
+		if (port->cons && !console_is_enabled(port->cons))
 			register_console(port->cons);
 
 		/*

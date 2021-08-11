@@ -332,7 +332,7 @@ static ssize_t enabled_store(struct config_item *item,
 	}
 
 	if (enabled) {	/* true */
-		if (nt->extended && !(netconsole_ext.flags & CON_ENABLED)) {
+		if (nt->extended && !console_is_enabled(&netconsole_ext)) {
 			netconsole_ext.flags |= CON_ENABLED;
 			register_console(&netconsole_ext);
 		}
@@ -915,7 +915,7 @@ static int __init init_netconsole(void)
 	if (err)
 		goto undonotifier;
 
-	if (netconsole_ext.flags & CON_ENABLED)
+	if (console_is_enabled(&netconsole_ext))
 		register_console(&netconsole_ext);
 	register_console(&netconsole);
 	pr_info("network logging started\n");

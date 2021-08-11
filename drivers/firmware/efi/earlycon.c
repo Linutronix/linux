@@ -30,7 +30,7 @@ static void *efi_fb;
 static int __init efi_earlycon_remap_fb(void)
 {
 	/* bail if there is no bootconsole or it has been disabled already */
-	if (!earlycon_console || !(earlycon_console->flags & CON_ENABLED))
+	if (!earlycon_console || !console_is_enabled(earlycon_console))
 		return 0;
 
 	efi_fb = memremap(fb_base, screen_info.lfb_size,
@@ -43,7 +43,7 @@ early_initcall(efi_earlycon_remap_fb);
 static int __init efi_earlycon_unmap_fb(void)
 {
 	/* unmap the bootconsole fb unless keep_bootcon has left it enabled */
-	if (efi_fb && !(earlycon_console->flags & CON_ENABLED))
+	if (efi_fb && !console_is_enabled(earlycon_console))
 		memunmap(efi_fb);
 	return 0;
 }

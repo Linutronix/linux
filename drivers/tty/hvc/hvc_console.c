@@ -265,7 +265,7 @@ static void hvc_port_destruct(struct tty_port *port)
 static void hvc_check_console(int index)
 {
 	/* Already enabled, bail out */
-	if (hvc_console.flags & CON_ENABLED)
+	if (console_is_enabled(&hvc_console))
 		return;
 
  	/* If this index is what the user requested, then register

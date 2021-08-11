@@ -2888,7 +2888,7 @@ static int atmel_serial_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_SERIAL_ATMEL_CONSOLE
 	if (uart_console(&atmel_port->uart)
-			&& ATMEL_CONSOLE_DEVICE->flags & CON_ENABLED) {
+			&& console_is_enabled(ATMEL_CONSOLE_DEVICE)) {
 		/*
 		 * The serial core enabled the clock for us, so undo
 		 * the clk_prepare_enable() in atmel_console_setup()

@@ -2046,7 +2046,7 @@ static void call_console_drivers(const char *ext_text, size_t ext_len,
 	for_each_console(con) {
 		if (exclusive_console && con != exclusive_console)
 			continue;
-		if (!(con->flags & CON_ENABLED))
+		if (!console_is_enabled(con))
 			continue;
 		if (!con->write)
 			continue;
@@ -2682,7 +2682,7 @@ static int have_callable_console(void)
 	struct console *con;
 
 	for_each_console(con)
-		if ((con->flags & CON_ENABLED) &&
+		if (console_is_enabled(con) &&
 				(con->flags & CON_ANYTIME))
 			return 1;
 
@@ -2887,7 +2887,7 @@ void console_unblank(void)
 	console_locked = 1;
 	console_may_schedule = 0;
 	for_each_console(c)
-		if ((c->flags & CON_ENABLED) && c->unblank)
+		if (console_is_enabled(c) && c->unblank)
 			c->unblank();
 	console_unlock();
 }
@@ -3019,7 +3019,7 @@ static int try_enable_new_console(struct console *newcon, bool user_specified)
 	 * without matching. Accept the pre-enabled consoles only when match()
 	 * and setup() had a chance to be called.
 	 */
-	if (newcon->flags & CON_ENABLED && c->user_specified ==	user_specified)
+	if (console_is_enabled(newcon) && c->user_specified == user_specified)
 		return 0;
 
 	return -ENOENT;

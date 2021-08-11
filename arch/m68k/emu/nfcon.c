@@ -49,7 +49,7 @@ static void nfcon_write(struct console *con, const char *str,
 static struct tty_driver *nfcon_device(struct console *con, int *index)
 {
 	*index = 0;
-	return (con->flags & CON_ENABLED) ? nfcon_tty_driver : NULL;
+	return console_is_enabled(con) ? nfcon_tty_driver : NULL;
 }
 
 static struct console nf_console = {
@@ -149,7 +149,7 @@ static int __init nfcon_init(void)
 		return res;
 	}
 
-	if (!(nf_console.flags & CON_ENABLED))
+	if (!console_is_enabled(&nf_console))
 		register_console(&nf_console);
 
 	return 0;

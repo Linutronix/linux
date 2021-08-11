@@ -153,6 +153,11 @@ struct console {
 	struct	 console *next;
 };
 
+static inline bool console_is_enabled(const struct console *con)
+{
+	return !!(con->flags & CON_ENABLED);
+}
+
 /*
  * for_each_console() allows you to iterate on each console
  */

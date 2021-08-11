@@ -560,7 +560,7 @@ static void kdb_msg_write(const char *msg, int msg_len)
 	}
 
 	for_each_console(c) {
-		if (!(c->flags & CON_ENABLED))
+		if (!console_is_enabled(c))
 			continue;
 		if (c == dbg_io_ops->cons)
 			continue;
