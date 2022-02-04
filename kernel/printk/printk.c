@@ -1941,6 +1941,7 @@ static int console_lock_spinning_disable_and_check(void)
 	return 1;
 }
 
+#if !IS_ENABLED(CONFIG_PREEMPT_RT)
 /**
  * console_trylock_spinning - try to get console_lock by busy waiting
  *
@@ -2014,6 +2015,7 @@ static int console_trylock_spinning(void)
 
 	return 1;
 }
+#endif /* CONFIG_PREEMPT_RT */
 
 /*
  * Call the specified console driver, asking it to write out the specified
@@ -2353,6 +2355,18 @@ asmlinkage int vprintk_emit(int facility, int level,
 
 	/* If called from the scheduler, we can not call up(). */
 	if (!in_sched && allow_direct_printing()) {
+#if IS_ENABLED(CONFIG_PREEMPT_RT)
+		/*
+		 * Use the non-spinning trylock since PREEMPT_RT does not
+		 * support console lock handovers.
+		 *
+		 * Direct printing will most likely involve taking spinlocks.
+		 * For PREEMPT_RT, this is only allowed if in a preemptible
+		 * context.
+		 */
+		if (preemptible() && console_trylock())
+			console_unlock();
+#else
 		/*
 		 * The caller may be holding system-critical or
 		 * timing-sensitive locks. Disable preemption during direct
@@ -2370,6 +2384,7 @@ asmlinkage int vprintk_emit(int facility, int level,
 		if (console_trylock_spinning())
 			console_unlock();
 		preempt_enable();
+#endif
 	}
 
 	wake_up_klogd();
@@ -3001,6 +3016,11 @@ static bool __console_emit_next_record(struct console *con, char *text, char *ex
 		write_text = text;
 		len = record_print_text(&r, console_msg_format & MSG_FORMAT_SYSLOG, printk_time);
 	}
+
+#if IS_ENABLED(CONFIG_PREEMPT_RT)
+	/* PREEMPT_RT does not support console lock handovers. */
+	handover = NULL;
+#endif
 
 	if (handover) {
 		/*
