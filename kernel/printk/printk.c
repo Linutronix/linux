@@ -361,6 +361,13 @@ static int console_msg_format = MSG_FORMAT_DEFAULT;
 /* syslog_lock protects syslog_* variables and write access to clear_seq. */
 static DEFINE_MUTEX(syslog_lock);
 
+/*
+ * A flag to signify if printk_activate_kthreads() has already started the
+ * kthread printers. If true, any later registered consoles must start their
+ * own kthread directly. The flag is write protected by the console_lock.
+ */
+static bool printk_kthreads_available;
+
 #ifdef CONFIG_PRINTK
 static atomic_t printk_prefer_direct = ATOMIC_INIT(0);
 
@@ -388,6 +395,21 @@ void printk_prefer_direct_enter(void)
 void printk_prefer_direct_exit(void)
 {
 	WARN_ON(atomic_dec_if_positive(&printk_prefer_direct) < 0);
+
+	/*
+	 * Threaded printers remain asleep while preferred direct printing is
+	 * active. Explicitly wake them in case any new printk records became
+	 * visible after preferred direct printing was deactivated.
+	 */
+	wake_up_klogd();
+}
+
+static inline bool allow_direct_printing(void)
+{
+	return (!printk_kthreads_available ||
+		system_state > SYSTEM_RUNNING ||
+		oops_in_progress ||
+		atomic_read(&printk_prefer_direct));
 }
 
 DECLARE_WAIT_QUEUE_HEAD(log_wait);
@@ -2258,10 +2280,10 @@ asmlinkage int vprintk_emit(int facility, int level,
 	printed_len = vprintk_store(facility, level, dev_info, fmt, args);
 
 	/* If called from the scheduler, we can not call up(). */
-	if (!in_sched) {
+	if (!in_sched && allow_direct_printing()) {
 		/*
 		 * The caller may be holding system-critical or
-		 * timing-sensitive locks. Disable preemption during
+		 * timing-sensitive locks. Disable preemption during direct
 		 * printing of all remaining records to all consoles so that
 		 * this context can return as soon as possible. Hopefully
 		 * another printk() caller will take over the printing.
@@ -2304,6 +2326,8 @@ EXPORT_SYMBOL(_printk);
 
 static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progress);
 
+static void printk_start_kthread(struct console *con);
+
 #else /* CONFIG_PRINTK */
 
 #define CONSOLE_LOG_MAX		0
@@ -2337,6 +2361,8 @@ static void call_console_driver(struct console *con, const char *text, size_t le
 }
 static bool suppress_message_printing(int level) { return false; }
 static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progress) { return true; }
+static void printk_start_kthread(struct console *con) { }
+static bool allow_direct_printing(void) { return true; }
 
 #endif /* CONFIG_PRINTK */
 
@@ -2537,6 +2563,13 @@ void resume_console(void)
 	down_console_sem();
 	console_suspended = 0;
 	console_unlock();
+
+	/*
+	 * While suspended, new records may have been added to the
+	 * ringbuffer. Wake up the kthread printers to print them.
+	 */
+	wake_up_klogd();
+
 	pr_flush(1000, true);
 }
 
@@ -2555,6 +2588,9 @@ static int console_cpu_notify(unsigned int cpu)
 		/* If trylock fails, someone else is doing the printing */
 		if (console_trylock())
 			console_unlock();
+
+		/* Wake kthread printers. Some may have become usable. */
+		wake_up_klogd();
 	}
 	return 0;
 }
@@ -2773,6 +2809,10 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
 	*handover = false;
 
 	do {
+		/* Let the kthread printers do the work if they can. */
+		if (!allow_direct_printing())
+			break;
+
 		any_progress = false;
 
 		for_each_console(con) {
@@ -2988,6 +3028,10 @@ void console_start(struct console *console)
 	console_lock();
 	console->flags |= CON_ENABLED;
 	console_unlock();
+
+	/* Wake the newly enabled kthread printer. */
+	wake_up_klogd();
+
 	__pr_flush(console, 1000, true);
 }
 EXPORT_SYMBOL(console_start);
@@ -3196,6 +3240,8 @@ void register_console(struct console *newcon)
 		/* Begin with next message. */
 		newcon->seq = prb_next_seq(prb);
 	}
+	if (printk_kthreads_available)
+		printk_start_kthread(newcon);
 	console_unlock();
 	console_sysfs_notify();
 
@@ -3222,6 +3268,7 @@ EXPORT_SYMBOL(register_console);
 
 int unregister_console(struct console *console)
 {
+	struct task_struct *thd = console->thread;
 	struct console *con;
 	int res;
 
@@ -3232,6 +3279,11 @@ int unregister_console(struct console *console)
 		return res;
 	if (res > 0)
 		return 0;
+
+	if (thd) {
+		console->thread = NULL;
+		kthread_stop(thd);
+	}
 
 	res = -ENODEV;
 	console_lock();
@@ -3358,6 +3410,20 @@ static int __init printk_late_init(void)
 }
 late_initcall(printk_late_init);
 
+static int __init printk_activate_kthreads(void)
+{
+	struct console *con;
+
+	console_lock();
+	printk_kthreads_available = true;
+	for_each_console(con)
+		printk_start_kthread(con);
+	console_unlock();
+
+	return 0;
+}
+early_initcall(printk_activate_kthreads);
+
 #if defined CONFIG_PRINTK
 /* If @con is specified, only wait for that console. Otherwise wait for all. */
 static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progress)
@@ -3433,6 +3499,154 @@ bool pr_flush(int timeout_ms, bool reset_on_progress)
 EXPORT_SYMBOL(pr_flush);
 
 /*
+ * Enter preferred direct printing, but never exit. Mark console threads as
+ * unavailable. The system is then forever in preferred direct printing and
+ * any printing threads will exit.
+ */
+static void printk_fallback_preferred_direct(void)
+{
+	printk_prefer_direct_enter();
+	pr_err("falling back to preferred direct printing\n");
+	printk_kthreads_available = false;
+}
+
+static bool printer_should_wake(struct console *con, u64 seq)
+{
+	short flags;
+
+	if (kthread_should_stop() || !printk_kthreads_available)
+		return true;
+
+	if (console_suspended)
+		return false;
+
+	if (!con->write)
+		return false;
+
+	/*
+	 * This is an unsafe read to con->flags, but a false positive is not
+	 * a problem. Worst case it would allow the printer to wake up even
+	 * when it is disabled. But the printer will notice that itself when
+	 * attempting to print and instead go back to sleep.
+	 */
+	flags = data_race(READ_ONCE(con->flags));
+	if (!(flags & CON_ENABLED))
+		return false;
+
+	if (atomic_read(&printk_prefer_direct))
+		return false;
+
+	return prb_read_valid(prb, seq, NULL);
+}
+
+static int printk_kthread_func(void *data)
+{
+	struct console *con = data;
+	char *dropped_text = NULL;
+	char *ext_text = NULL;
+	bool handover;
+	u64 seq = 0;
+	char *text;
+	int error;
+
+	text = kmalloc(CONSOLE_LOG_MAX, GFP_KERNEL);
+	if (!text) {
+		printk_console_msg(con, KERN_ERR, "failed to allocate text buffer");
+		printk_fallback_preferred_direct();
+		goto out;
+	}
+
+	if (con->flags & CON_EXTENDED) {
+		ext_text = kmalloc(CONSOLE_EXT_LOG_MAX, GFP_KERNEL);
+		if (!ext_text) {
+			printk_console_msg(con, KERN_ERR, "failed to allocate ext_text buffer");
+			printk_fallback_preferred_direct();
+			goto out;
+		}
+	} else {
+		dropped_text = kmalloc(DROPPED_TEXT_MAX, GFP_KERNEL);
+		if (!dropped_text) {
+			printk_console_msg(con, KERN_ERR,
+					   "failed to allocate dropped_text buffer");
+			printk_fallback_preferred_direct();
+			goto out;
+		}
+	}
+
+	printk_console_msg(con, KERN_INFO, "printing thread started");
+
+	for (;;) {
+		/*
+		 * Guarantee this task is visible on the waitqueue before
+		 * checking the wake condition.
+		 *
+		 * The full memory barrier within set_current_state() of
+		 * prepare_to_wait_event() pairs with the full memory barrier
+		 * within wq_has_sleeper().
+		 *
+		 * See __wake_up_klogd:A for the pairing memory barrier.
+		 */
+		error = wait_event_interruptible(log_wait,
+				printer_should_wake(con, seq)); /* LMM(printk_kthread_func:A) */
+
+		if (kthread_should_stop() || !printk_kthreads_available)
+			break;
+
+		if (error)
+			continue;
+
+		console_lock();
+
+		if (console_suspended) {
+			__console_unlock();
+			continue;
+		}
+
+		if (!console_is_usable(con)) {
+			__console_unlock();
+			continue;
+		}
+
+		/*
+		 * Even though the printk kthread is always preemptible, it is
+		 * still not allowed to call cond_resched() from within
+		 * console drivers. The task may become non-preemptible in the
+		 * console driver call chain. For example, vt_console_print()
+		 * takes a spinlock and then can call into fbcon_redraw(),
+		 * which can conditionally invoke cond_resched().
+		 */
+		console_may_schedule = 0;
+		console_emit_next_record(con, text, ext_text, dropped_text, &handover);
+		if (handover)
+			continue;
+
+		seq = con->seq;
+
+		__console_unlock();
+	}
+
+	printk_console_msg(con, KERN_INFO, "printing thread stopped");
+out:
+	kfree(dropped_text);
+	kfree(ext_text);
+	kfree(text);
+	return 0;
+}
+
+/* Must be called within console_lock(). */
+static void printk_start_kthread(struct console *con)
+{
+	con->thread = kthread_run(printk_kthread_func, con,
+				  "pr/%s%d", con->name, con->index);
+	if (IS_ERR(con->thread)) {
+		con->thread = NULL;
+		printk_console_msg(con, KERN_ERR, "unable to start printing thread");
+		printk_fallback_preferred_direct();
+		return;
+	}
+}
+
+/*
  * Delayed printk version, for scheduler-internal messages:
  */
 #define PRINTK_PENDING_WAKEUP	0x01
@@ -3445,40 +3659,64 @@ static void wake_up_klogd_work_func(struct irq_work *irq_work)
 	int pending = this_cpu_xchg(printk_pending, 0);
 
 	if (pending & PRINTK_PENDING_OUTPUT) {
+		printk_prefer_direct_enter();
+
 		/* If trylock fails, someone else is doing the printing */
 		if (console_trylock())
 			console_unlock();
+
+		printk_prefer_direct_exit();
 	}
 
 	if (pending & PRINTK_PENDING_WAKEUP)
-		wake_up_interruptible(&log_wait);
+		wake_up_interruptible_all(&log_wait);
 }
 
 static DEFINE_PER_CPU(struct irq_work, wake_up_klogd_work) =
 	IRQ_WORK_INIT_LAZY(wake_up_klogd_work_func);
 
-void wake_up_klogd(void)
+static void __wake_up_klogd(int val)
 {
 	if (!printk_percpu_data_ready())
 		return;
 
 	preempt_disable();
-	if (waitqueue_active(&log_wait)) {
-		this_cpu_or(printk_pending, PRINTK_PENDING_WAKEUP);
+	/*
+	 * Guarantee any new records can be seen by printing threads before
+	 * checking if the wait queue is empty.
+	 *
+	 * The full memory barrier within wq_has_sleeper() pairs with the full
+	 * memory barrier within set_current_state() of
+	 * prepare_to_wait_event(), which is called after ___wait_event() adds
+	 * the waiter but before it has checked the wait condition.
+	 *
+	 * See printk_kthread_func:A for the pairing memory barrier.
+	 */
+	if (wq_has_sleeper(&log_wait) || /* LMM(__wake_up_klogd:A) */
+	    (val & PRINTK_PENDING_OUTPUT)) {
+		this_cpu_or(printk_pending, val);
 		irq_work_queue(this_cpu_ptr(&wake_up_klogd_work));
 	}
 	preempt_enable();
 }
 
+void wake_up_klogd(void)
+{
+	__wake_up_klogd(PRINTK_PENDING_WAKEUP);
+}
+
 void defer_console_output(void)
 {
-	if (!printk_percpu_data_ready())
-		return;
+	int val = PRINTK_PENDING_WAKEUP;
 
-	preempt_disable();
-	this_cpu_or(printk_pending, PRINTK_PENDING_OUTPUT);
-	irq_work_queue(this_cpu_ptr(&wake_up_klogd_work));
-	preempt_enable();
+	/*
+	 * If console deferring was called with preferred direct printing,
+	 * make the irqwork perform the direct printing.
+	 */
+	if (atomic_read(&printk_prefer_direct))
+		val |= PRINTK_PENDING_OUTPUT;
+
+	__wake_up_klogd(val);
 }
 
 void printk_trigger_flush(void)
