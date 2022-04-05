@@ -2993,6 +2993,10 @@ static void try_enable_default_console(struct console *newcon)
 		newcon->flags |= CON_CONSDEV;
 }
 
+#define printk_console_msg(c, lvl, msg) \
+	printk(lvl pr_fmt("%sconsole [%s%d] " msg "\n"), \
+	       (c->flags & CON_BOOT) ? "boot" : "", c->name, c->index)
+
 /*
  * The console driver calls this routine during kernel initialization
  * to register the console printing procedure with printk() and to
@@ -3131,9 +3135,7 @@ void register_console(struct console *newcon)
 	 * users know there might be something in the kernel's log buffer that
 	 * went to the bootconsole (that they do not see on the real console)
 	 */
-	pr_info("%sconsole [%s%d] enabled\n",
-		(newcon->flags & CON_BOOT) ? "boot" : "" ,
-		newcon->name, newcon->index);
+	printk_console_msg(newcon, KERN_INFO, "enabled");
 	if (bootcon_enabled &&
 	    ((newcon->flags & (CON_CONSDEV | CON_BOOT)) == CON_CONSDEV) &&
 	    !keep_bootcon) {
@@ -3152,9 +3154,7 @@ int unregister_console(struct console *console)
 	struct console *con;
 	int res;
 
-	pr_info("%sconsole [%s%d] disabled\n",
-		(console->flags & CON_BOOT) ? "boot" : "" ,
-		console->name, console->index);
+	printk_console_msg(console, KERN_INFO, "disabled");
 
 	res = _braille_unregister_console(console);
 	if (res < 0)
